@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GraphRAG Explorer</title>
+    <script src="//cdn.jsdelivr.net/npm/3d-force-graph"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+        
+        /* This ensures the graph takes up the full screen and is at the bottom of the stack */
+        #3d-graph { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100vw; 
+            height: 100vh; 
+            z-index: 1; 
+        }
+
+        /* The UI sits on top but doesn't block the mouse */
+        #ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100; /* High z-index */
+            color: white;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #444;
+            pointer-events: none; /* CLICKS PASS THROUGH */
+            width: 250px;
+        }
+
+        /* Elements inside the UI that SHOULD be clickable */
+        .interactive {
+            pointer-events: auto; 
+            cursor: pointer;
+        }
+
+        .legend-item { display: flex; align-items: center; margin: 8px 0; font-size: 14px; }
+        .dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; margin-right: 10px; }
+        .line { height: 3px; width: 20px; display: inline-block; margin-right: 10px; }
+        input { 
+            width: 100%; padding: 8px; margin-top: 10px; 
+            background: #222; border: 1px solid #555; color: white; border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-overlay">
+        <h2 style="margin: 0 0 15px 0; color: #00ffff;">GraphRAG</h2>
+        
+        <div class="legend-item"><span class="dot" style="background:#00ff00"></span> Processed</div>
+        <div class="legend-item"><span class="dot" style="background:#ff0000"></span> Pending</div>
+        <div class="legend-item"><span class="dot" style="background:#00ffff"></span> Metadata</div>
+        
+        <hr style="border:0; border-top:1px solid #444; margin: 15px 0;">
+        
+        <div class="legend-item"><span class="line" style="background:#ff00ff"></span> Author</div>
+        <div class="legend-item"><span class="line" style="background:#ffff00"></span> Keyword</div>
+        <div class="legend-item"><span class="line" style="background:#0000ff"></span> Theme</div>
+
+        <input type="text" id="search-box" class="interactive" placeholder="Search Paper ID...">
+    </div>
+
+    <div id="3d-graph"></div>
+
+    <script>
+        const linkColors = { 'HAS_CREATOR': '#ff00ff', 'HAS_KEYWORD': '#ffff00', 'HAS_THEME': '#0000ff' };
+        const nodeColors = { 1: '#00ff00', 0: '#ff0000', 2: '#00ffff' };
+
+        const Graph = ForceGraph3D()(document.getElementById('3d-graph'))
+            .jsonUrl('graph_data.json')
+            .nodeColor(node => nodeColors[node.group] || '#ffffff')
+            .nodeLabel(node => `${node.label}: ${node.name || node.id}`)
+            .linkColor(link => linkColors[link.rel_type] || '#ffffff')
+            .linkDirectionalParticles(2)
+            .linkDirectionalParticleWidth(3) // Make particles slightly larger to match thick links
+            .linkWidth(2.0) // Try 1.5, 2.0, or 3.0 depending on your preference
+            .linkWidth(link => {
+                if (link.rel_type === 'HAS_THEME') return 4.0; // Very thick for major categories
+                if (link.rel_type === 'HAS_CREATOR') return 2.0;
+                return 1.0; // Thinner for keywords
+            })
+            .onNodeClick(node => {
+                console.log("Node clicked:", node.id); // Check console (F12)
+                const distance = 100;
+                const distRatio = 1 + distance/Math.hypot(node.x, node.y, node.z);
+                Graph.cameraPosition(
+                    { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+                    node, 
+                    2000
+                );
+            });
+
+        // Search functionality
+        document.getElementById('search-box').addEventListener('input', e => {
+            const val = e.target.value.toLowerCase();
+            const nodes = Graph.graphData().nodes;
+            const target = nodes.find(n => (n.id && n.id.toLowerCase().includes(val)) || (n.name && n.name.toLowerCase().includes(val)));
+            
+            if (target) {
+                const distance = 150;
+                const distRatio = 1 + distance/Math.hypot(target.x, target.y, target.z);
+                Graph.cameraPosition({ x: target.x * distRatio, y: target.y * distRatio, z: target.z * distRatio }, target, 1000);
+            }
+        });
+    </script>
+</body>
+</html>
