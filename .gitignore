@@ -1,3 +1,5 @@
 .venv
+.env
 notebooks/croma*
 notebooks/config.py
+data
