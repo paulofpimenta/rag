@@ -3,3 +3,4 @@
 notebooks/croma*
 notebooks/config.py
 data
+docker/neo4j*/
