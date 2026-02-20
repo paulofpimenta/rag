@@ -58,9 +58,8 @@
         
         <hr style="border:0; border-top:1px solid #444; margin: 15px 0;">
         
-        <div class="legend-item"><span class="line" style="background:#ff00ff"></span> Author</div>
-        <div class="legend-item"><span class="line" style="background:#ffff00"></span> Keyword</div>
-        <div class="legend-item"><span class="line" style="background:#0000ff"></span> Theme</div>
+        <div class="legend-item"><span class="line" style="background:#00ffff"></span> Section (hasPart)</div>
+        <div class="legend-item"><span class="line" style="background:#ffff00"></span> Keyword (Mentions)</div>
 
         <input type="text" id="search-box" class="interactive" placeholder="Search Paper ID...">
     </div>
@@ -68,45 +67,74 @@
     <div id="3d-graph"></div>
 
     <script>
-        const linkColors = { 'HAS_CREATOR': '#ff00ff', 'HAS_KEYWORD': '#ffff00', 'HAS_THEME': '#0000ff' };
-        const nodeColors = { 1: '#00ff00', 0: '#ff0000', 2: '#00ffff' };
+        // Added a purple color (Group 3) for the exploded DCAT properties
+const linkColors = { 
+    'dcterms_hasPart': '#444444', 
+    'MENTIONS': '#ffff00',
+    'HAS_PROPERTY': '#ff00ff' // Color for the exploded property lines
+};
+const nodeColors = { 
+    1: '#00ff00', // Processed 
+    0: '#ff0000', // Pending 
+    2: '#00ffff', // Keywords
+    3: '#ff00ff'  // Exploded Properties (Purple)
+};
 
-        const Graph = ForceGraph3D()(document.getElementById('3d-graph'))
-            .jsonUrl('graph_data.json')
-            .nodeColor(node => nodeColors[node.group] || '#ffffff')
-            .nodeLabel(node => `${node.label}: ${node.name || node.id}`)
-            .linkColor(link => linkColors[link.rel_type] || '#ffffff')
-            .linkDirectionalParticles(2)
-            .linkDirectionalParticleWidth(3) // Make particles slightly larger to match thick links
-            .linkWidth(2.0) // Try 1.5, 2.0, or 3.0 depending on your preference
-            .linkWidth(link => {
-                if (link.rel_type === 'HAS_THEME') return 4.0; // Very thick for major categories
-                if (link.rel_type === 'HAS_CREATOR') return 2.0;
-                return 1.0; // Thinner for keywords
-            })
-            .onNodeClick(node => {
-                console.log("Node clicked:", node.id); // Check console (F12)
-                const distance = 100;
-                const distRatio = 1 + distance/Math.hypot(node.x, node.y, node.z);
-                Graph.cameraPosition(
-                    { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
-                    node, 
-                    2000
-                );
-            });
+const Graph = ForceGraph3D()(document.getElementById('3d-graph'))
+    .jsonUrl('graph_data.json')
+    .nodeColor(node => nodeColors[node.group] || '#ffffff') // Compatibility fix
+    .nodeLabel(node => {
+        if (node.group === 3) return (node.label || 'Property') + ': ' + (node.full_text || node.name);
+        return (node.label || 'Node') + ': ' + (node.name || node.id);
+    })
+    .linkColor(link => linkColors[link.rel_type] || '#ffffff')
+    .nodeRelSize(7)
+    .linkWidth(link => link.score ? Math.min(link.score * 0.8, 5) : 1)
+    .onNodeClick(node => {
+        // Basic Zoom
+        const distance = 120;
+        const distRatio = 1 + distance/Math.hypot(node.x, node.y, node.z);
+        Graph.cameraPosition(
+            { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+            node, 
+            2000
+        );
 
-        // Search functionality
-        document.getElementById('search-box').addEventListener('input', e => {
-            const val = e.target.value.toLowerCase();
-            const nodes = Graph.graphData().nodes;
-            const target = nodes.find(n => (n.id && n.id.toLowerCase().includes(val)) || (n.name && n.name.toLowerCase().includes(val)));
+        // Explosion Logic with safety checks
+        if (node.group < 2 && !node.exploded) {
+            node.exploded = true;
+            const { nodes, links } = Graph.graphData();
             
-            if (target) {
-                const distance = 150;
-                const distRatio = 1 + distance/Math.hypot(target.x, target.y, target.z);
-                Graph.cameraPosition({ x: target.x * distRatio, y: target.y * distRatio, z: target.z * distRatio }, target, 1000);
-            }
-        });
+            const newNodes = [
+                { id: node.id + '_t', name: 'Title', full_text: node.title, group: 3, label: 'Metadata' },
+                { id: node.id + '_a', name: 'Abstract', full_text: node.abstract, group: 3, label: 'Metadata' }
+            ];
+
+            const newLinks = newNodes.map(n => ({
+                source: node.id,
+                target: n.id,
+                rel_type: 'HAS_PROPERTY'
+            }));
+
+            Graph.graphData({
+                nodes: [...nodes, ...newNodes],
+                links: [...links, ...newLinks]
+            });
+        }
+    });
+
+    // Search functionality remains the same
+    document.getElementById('search-box').addEventListener('input', e => {
+        const val = e.target.value.toLowerCase();
+        const nodes = Graph.graphData().nodes;
+        const target = nodes.find(n => (n.id && n.id.toLowerCase().includes(val)) || (n.name && n.name.toLowerCase().includes(val)));
+        
+        if (target) {
+            const distance = 150;
+            const distRatio = 1 + distance/Math.hypot(target.x, target.y, target.z);
+            Graph.cameraPosition({ x: target.x * distRatio, y: target.y * distRatio, z: target.z * distRatio }, target, 1000);
+        }
+    });
     </script>
 </body>
 </html>
