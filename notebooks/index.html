@@ -2,139 +2,102 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>GraphRAG Explorer</title>
-    <script src="//cdn.jsdelivr.net/npm/3d-force-graph"></script>
+    <title>GraphRAG - Query Provenance Only</title>
+    <script src="https://unpkg.com/3d-force-graph"></script>
     <style>
         body { margin: 0; padding: 0; background: #000; overflow: hidden; font-family: sans-serif; }
-        
-        /* This ensures the graph takes up the full screen and is at the bottom of the stack */
-        #3d-graph { 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            width: 100vw; 
-            height: 100vh; 
-            z-index: 1; 
-        }
-
-        /* The UI sits on top but doesn't block the mouse */
+        #3d-graph { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
         #ui-overlay {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            z-index: 100; /* High z-index */
-            color: white;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid #444;
-            pointer-events: none; /* CLICKS PASS THROUGH */
-            width: 250px;
+            position: absolute; top: 20px; left: 20px; z-index: 100;
+            color: white; background: rgba(0, 0, 0, 0.85);
+            padding: 20px; border-radius: 12px; border: 1px solid #444; width: 300px;
         }
-
-        /* Elements inside the UI that SHOULD be clickable */
-        .interactive {
-            pointer-events: auto; 
-            cursor: pointer;
-        }
-
-        .legend-item { display: flex; align-items: center; margin: 8px 0; font-size: 14px; }
-        .dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; margin-right: 10px; }
-        .line { height: 3px; width: 20px; display: inline-block; margin-right: 10px; }
-        input { 
-            width: 100%; padding: 8px; margin-top: 10px; 
-            background: #222; border: 1px solid #555; color: white; border-radius: 4px;
-        }
+        #status { font-size: 0.85em; color: #00ffcc; margin-top: 10px; line-height: 1.4; }
+        .legend-item { display: flex; align-items: center; margin: 8px 0; font-size: 0.9em;}
+        .dot { width: 12px; height: 12px; border-radius: 50%; margin-right: 10px; }
     </style>
 </head>
 <body>
 
     <div id="ui-overlay">
-        <h2 style="margin: 0 0 15px 0; color: #00ffff;">GraphRAG</h2>
+        <h2 style="margin:0 0 10px 0;">Query Trace View</h2>
+        <p style="font-size: 0.9em; color: #bbb;">Showing only Queries and their direct evidence (provenance).</p>
         
-        <div class="legend-item"><span class="dot" style="background:#00ff00"></span> Processed</div>
-        <div class="legend-item"><span class="dot" style="background:#ff0000"></span> Pending</div>
-        <div class="legend-item"><span class="dot" style="background:#00ffff"></span> Metadata</div>
-        
-        <hr style="border:0; border-top:1px solid #444; margin: 15px 0;">
-        
-        <div class="legend-item"><span class="line" style="background:#00ffff"></span> Section (hasPart)</div>
-        <div class="legend-item"><span class="line" style="background:#ffff00"></span> Keyword (Mentions)</div>
-
-        <input type="text" id="search-box" class="interactive" placeholder="Search Paper ID...">
+        <div class="legend">
+            <div class="legend-item"><div class="dot" style="background: #E6194B;"></div> Paper (Source)</div>
+            <div class="legend-item"><div class="dot" style="background: #3CB44B;"></div> Section (Evidence)</div>
+            <div class="legend-item"><div class="dot" style="background: #f5d142;"></div> Query (Target)</div>
+        </div>
+        <div id="status">Filtering for query-related nodes...</div>
     </div>
 
     <div id="3d-graph"></div>
 
     <script>
-        // Added a purple color (Group 3) for the exploded DCAT properties
-const linkColors = { 
-    'dcterms_hasPart': '#444444', 
-    'MENTIONS': '#ffff00',
-    'HAS_PROPERTY': '#ff00ff' // Color for the exploded property lines
-};
-const nodeColors = { 
-    1: '#00ff00', // Processed 
-    0: '#ff0000', // Pending 
-    2: '#00ffff', // Keywords
-    3: '#ff00ff'  // Exploded Properties (Purple)
-};
+        const statusElement = document.getElementById('status');
 
-const Graph = ForceGraph3D()(document.getElementById('3d-graph'))
-    .jsonUrl('graph_data.json')
-    .nodeColor(node => nodeColors[node.group] || '#ffffff') // Compatibility fix
-    .nodeLabel(node => {
-        if (node.group === 3) return (node.label || 'Property') + ': ' + (node.full_text || node.name);
-        return (node.label || 'Node') + ': ' + (node.name || node.id);
-    })
-    .linkColor(link => linkColors[link.rel_type] || '#ffffff')
-    .nodeRelSize(7)
-    .linkWidth(link => link.score ? Math.min(link.score * 0.8, 5) : 1)
-    .onNodeClick(node => {
-        // Basic Zoom
-        const distance = 120;
-        const distRatio = 1 + distance/Math.hypot(node.x, node.y, node.z);
-        Graph.cameraPosition(
-            { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
-            node, 
-            2000
-        );
+        fetch('graph_data.json')
+            .then(res => res.json())
+            .then(data => {
+                // 1. Identify all Query nodes (Group 4)
+                const queryNodes = data.nodes.filter(n => n.group === 4);
+                const queryIds = new Set(queryNodes.map(n => n.id));
 
-        // Explosion Logic with safety checks
-        if (node.group < 2 && !node.exploded) {
-            node.exploded = true;
-            const { nodes, links } = Graph.graphData();
-            
-            const newNodes = [
-                { id: node.id + '_t', name: 'Title', full_text: node.title, group: 3, label: 'Metadata' },
-                { id: node.id + '_a', name: 'Abstract', full_text: node.abstract, group: 3, label: 'Metadata' }
-            ];
+                // 2. Find all links connected to a Query
+                const queryLinks = data.links.filter(l => 
+                    queryIds.has(l.source) || queryIds.has(l.target)
+                );
 
-            const newLinks = newNodes.map(n => ({
-                source: node.id,
-                target: n.id,
-                rel_type: 'HAS_PROPERTY'
-            }));
+                // 3. Identify "Neighbor" nodes (the evidence/papers the query points to)
+                const neighborIds = new Set();
+                queryLinks.forEach(l => {
+                    neighborIds.add(l.source);
+                    neighborIds.add(l.target);
+                });
 
-            Graph.graphData({
-                nodes: [...nodes, ...newNodes],
-                links: [...links, ...newLinks]
+                // 4. Create the filtered dataset
+                const filteredNodes = data.nodes.filter(n => neighborIds.has(n.id));
+                const filteredData = {
+                    nodes: filteredNodes,
+                    links: queryLinks
+                };
+
+                statusElement.innerHTML = `
+                    <b>Active View:</b><br>
+                    Queries Found: ${queryIds.size}<br>
+                    Evidence Nodes: ${filteredNodes.length - queryIds.size}<br>
+                    Total Connections: ${queryLinks.length}
+                `;
+
+                const Graph = ForceGraph3D()(document.getElementById('3d-graph'))
+                    .graphData(filteredData)
+                    .nodeId('id')
+                    .nodeLabel(node => node.text || node.title || node.id)
+                    .nodeAutoColorBy('group')
+                    .linkLabel('rel')
+                    .linkDirectionalParticles(2) // Flowing dots to show direction
+                    .linkDirectionalParticleSpeed(0.005)
+                    .linkDirectionalArrowLength(4)
+                    .linkDirectionalArrowRelPos(1);
+
+                // Styling adjustments
+                Graph.nodeColor(node => {
+                    if (node.group === 4) return '#f5d142'; // Bright Yellow for Queries
+                    if (node.group === 1) return '#E6194B'; // Red for Papers
+                    if (node.group === 2) return '#3CB44B'; // Green for Sections
+                    return '#ffffff';
+                });
+
+                // Zoom in on the query clusters
+                Graph.d3Force('charge').strength(-200);
+                Graph.d3Force('link').distance(80);
+
+            })
+            .catch(err => {
+                statusElement.style.color = "#ff4444";
+                statusElement.innerText = "Error loading data.";
+                console.error(err);
             });
-        }
-    });
-
-    // Search functionality remains the same
-    document.getElementById('search-box').addEventListener('input', e => {
-        const val = e.target.value.toLowerCase();
-        const nodes = Graph.graphData().nodes;
-        const target = nodes.find(n => (n.id && n.id.toLowerCase().includes(val)) || (n.name && n.name.toLowerCase().includes(val)));
-        
-        if (target) {
-            const distance = 150;
-            const distRatio = 1 + distance/Math.hypot(target.x, target.y, target.z);
-            Graph.cameraPosition({ x: target.x * distRatio, y: target.y * distRatio, z: target.z * distRatio }, target, 1000);
-        }
-    });
     </script>
 </body>
 </html>
